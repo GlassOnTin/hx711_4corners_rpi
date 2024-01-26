@@ -3,6 +3,8 @@
 ## Overview
 This project includes a Python script that interfaces with the HX711 load cell amplifier to create a digital scale using the Raspberry Pi. It's designed to handle multiple sensors, calculate tare and scale factor, and provide bootstrapped confidence intervals for measurements.
 
+Uses: https://pypi.org/project/hx711/
+
 ## Features
 - Support for multiple HX711 sensors.
 - Functions to tare the scale and calibrate with a known weight.
@@ -14,17 +16,14 @@ This project includes a Python script that interfaces with the HX711 load cell a
 - HX711 load cell amplifier.
 - Compatible load cells.
 - Python 3.x
-- Required Python libraries: `numpy`, `RPi.GPIO`.
+- Required Python libraries: `numpy`, `scipy`, `matplotlib`, `RPi.GPIO`, `HX711`
 
 ## Installation
 1. Clone the repository:
-git clone [URL of your repository]
+git clone https://github.com/GlassOnTin/hx711_4corners_rpi
 
 2. Install required Python libraries (if not already installed):
 pip install numpy scipy matplotlib RPi.GPIO HX711
-
-markdown
-Copy code
 
 ## Configuration
 - The script uses `scale_config.ini` for storing calibration and tare data. Ensure this file is in the same directory as the script or specify the path in the script.
