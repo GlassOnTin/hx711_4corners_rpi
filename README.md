@@ -29,11 +29,26 @@ pip install numpy scipy matplotlib RPi.GPIO HX711
 - The script uses `scale_config.ini` for storing calibration and tare data. Ensure this file is in the same directory as the script or specify the path in the script.
 
 ## Usage
-- To use the script, run `python hx4.py` with the following command line options:
-- `-d [duration]`: Set the duration for collecting samples.
-- `-H [host]`: Set the host for the service (default is `0.0.0.0`).
-- `-P [port]`: Set the port for the service (default is `7999`).
-- `-n [number]`: Set the number of measurements (default is `10000`).
+```
+usage: hx4.py [-h] [-t] [-c CALIBRATE] [-d DURATION] [-n NUMBER] [-o OUTPUT] [-p PLOT] [-H HOST] [-P PORT]
+
+Scale Operation
+
+options:
+  -h, --help            show this help message and exit
+  -t, --tare            Tare the scale
+  -c CALIBRATE, --calibrate CALIBRATE
+                        Calibrate the scale with a known weight
+  -d DURATION, --duration DURATION
+                        Sample duration in seconds
+  -n NUMBER, --number NUMBER
+                        Number of samples of given duration to report
+  -o OUTPUT, --output OUTPUT
+                        Path to output results
+  -p PLOT, --plot PLOT  Path to output chart of results
+  -H HOST, --host HOST  Host address for the HTTP server
+  -P PORT, --port PORT  Port for the HTTP server
+```
 
 - Calibration and taring can be performed through the script's methods.
 
