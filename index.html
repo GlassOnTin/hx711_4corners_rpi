@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Weight Readings Chart</title>
+    <script type="text/javascript">
+        function refreshImage() {
+            var img = document.getElementById("chart");
+            var src = img.src;
+            // Append or update a query string to the image URL to bypass caching
+            img.src = src.split("?")[0] + "?" + new Date().getTime();
+        }
+        // Set interval for refreshing the image (e.g., every 5 seconds)
+        setInterval(refreshImage, 5000);
+    </script>
+</head>
+<body>
+    <img id="chart" src="samples.png" alt="Weight Readings Chart">
+</body>
+</html>

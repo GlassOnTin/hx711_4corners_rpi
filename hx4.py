@@ -5,6 +5,8 @@ from collections import deque
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+
+from urllib.parse import urlparse
 import http.server
 import socketserver
 import threading
@@ -29,7 +31,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         http.server.SimpleHTTPRequestHandler.end_headers(self)
 
     def do_GET(self):
-        if self.path.endswith(".png") or self.path.endswith(".txt"):
+        # Parse the URL path, removing any query string
+        parsed_path = urlparse(self.path)
+        self.path = parsed_path.path
+        
+        if self.path == '/':
+            self.path = '/index.html'  # Set default page
+            return http.server.SimpleHTTPRequestHandler.do_GET(self)
+        elif self.path.endswith(".png") or self.path.endswith(".txt") or self.path == "/index.html":
             return http.server.SimpleHTTPRequestHandler.do_GET(self)
         else:
             self.send_error(404, "File Not Found: %s" % self.path)
