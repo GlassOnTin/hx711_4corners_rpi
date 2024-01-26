@@ -1,0 +1,13 @@
+[Unit]
+Description= HX711 4-corner Python Service
+After=network.target
+
+[Service]
+Type=simple
+User=ian
+WorkingDirectory=/home/ian/hx711
+ExecStart=/usr/bin/python3 /home/ian/hx711/hx4.py -d 60 -H 0.0.0.0 -P 7999 -n 10000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
