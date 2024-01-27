@@ -32,6 +32,10 @@
 			var duration = 10; // Default duration or get it from user input
 			sendPostRequest('/calibrate', 'weight=' + weight + '&duration=' + duration);
 		}
+		
+		function clearScale() {
+			sendPostRequest('/clear','');		
+		}
 
     </script>
 </head>
@@ -39,9 +43,12 @@
     <img id="chart" src="samples.png" alt="Weight Readings Chart">
     <div>
         <button onclick="tareScale()">Tare Scale</button> <!-- Tare button -->
-        <br>
+        <br><br>
         <input type="number" id="calibrationWeight" placeholder="Enter weight for calibration">
         <button onclick="calibrateScale()">Calibrate Scale</button> <!-- Calibrate button -->
+		<br><br>
+        <button onclick="clearScale()">Clear</button> <!-- Clear button -->
+		
 		
     </div>
 

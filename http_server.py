@@ -5,12 +5,10 @@ import socket
 import socketserver
 import urllib
 from urllib.parse import urlparse, parse_qs
-from scale import Scale
-from states import STATE_TARING, STATE_CALIBRATING, STATE_MEASURING
+from states import STATE_TARING, STATE_CALIBRATING, STATE_MEASURING, STATE_CLEARING
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, scale=None, state_q=None, config_file='scale_config.ini',**kwargs):
-        self.scale = scale
+    def __init__(self, *args, state_q=None, config_file='scale_config.ini',**kwargs):
         self.state_q = state_q
         
         self.config_file = config_file
@@ -50,11 +48,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == '/calibrate':
             print("Calibrating")
 
+            # Write the target weight to the config
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = urllib.parse.parse_qs(post_data.decode('utf-8'))
             known_weight = float(data.get('weight', [1])[0])  # Default weight 1 unit
-            self.config['DEFAULT']['KnownWeight'] = str(known_weight)
+            self.config['DEFAULT']['calibrate'] = str(known_weight)
             with open(self.config_file, 'w') as configfile:
                 self.config.write(configfile)
 
@@ -65,12 +64,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"Calibration complete.")
         
+        elif self.path == "/clear":
+            print("Clearing")
+            
+            while not self.state_q.empty(): self.state_q.get()
+            self.state_q.put(STATE_CLEARING)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Clear complete.")
+            
         else:
             self.send_error(404, "Unsupported operation")
+            
+    
 
-def start_http_server(host, port, directory, scale, state_q):
+def start_http_server(host, port, directory, state_q):
     def handler(*args, **kwargs):
-        return CustomHandler(*args, scale=scale, state_q=state_q, **kwargs)
+        return CustomHandler(*args, state_q=state_q, **kwargs)
 
     with socketserver.TCPServer((host, port), handler) as httpd:
         httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

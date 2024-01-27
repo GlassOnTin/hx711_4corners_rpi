@@ -1,0 +1,13 @@
+[DEFAULT]
+knownweight = 569.0
+tare_value = 1974271.5
+scale_factor = 0.0012627829559136343
+tare = False
+calibrate = None
+duration = 10.0
+number = 10000
+output = samples.txt
+plot = samples.png
+host = 0.0.0.0
+port = 7999
+
