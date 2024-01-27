@@ -1,17 +1,24 @@
 #!/usr/bin/python3
 import argparse
+import configparser
 import os
+import signal
+import traceback
+
 from collections import deque
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
 
+import urllib
 from urllib.parse import urlparse
 import http.server
+import socket
 import socketserver
 import threading
+import queue
 
 from scale import Scale
+from http_server import start_http_server  # Import the server start function
+from states import STATE_TARING, STATE_CALIBRATING, STATE_MEASURING
 
 def format_with_precision(value, precision):
     """Format the value with the given precision in decimal places."""
@@ -25,32 +32,13 @@ def calculate_significant_figures(lower_bound, upper_bound):
     # Use the higher number of decimal places
     return max(decimal_places_lower, decimal_places_upper)
     
-class CustomHandler(http.server.SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        http.server.SimpleHTTPRequestHandler.end_headers(self)
+def signal_handler(sig, frame):
+    print('Shutting down the server...')
+    httpd.shutdown()  # Shutdown the server
+    httpd.server_close()  # Close the server socket
+    sys.exit(0)
 
-    def do_GET(self):
-        # Parse the URL path, removing any query string
-        parsed_path = urlparse(self.path)
-        self.path = parsed_path.path
-        
-        if self.path == '/':
-            self.path = '/index.html'  # Set default page
-            return http.server.SimpleHTTPRequestHandler.do_GET(self)
-        elif self.path.endswith(".png") or self.path.endswith(".txt") or self.path == "/index.html":
-            return http.server.SimpleHTTPRequestHandler.do_GET(self)
-        else:
-            self.send_error(404, "File Not Found: %s" % self.path)
-
-def start_http_server(host, port, directory):
-    with socketserver.TCPServer((host, port), CustomHandler) as httpd:
-        print(f"Serving at http://{host}:{port}")
-        os.chdir(directory)  # Change working directory to serve files
-        httpd.serve_forever()
-
-
-def main():
+def main():  
     parser = argparse.ArgumentParser(description="Scale Operation")
     parser.add_argument("-t", "--tare", action="store_true", help="Tare the scale")
     parser.add_argument("-c", "--calibrate", type=float, help="Calibrate the scale with a known weight")
@@ -62,66 +50,78 @@ def main():
     parser.add_argument("-P", "--port", type=int, default=0, help="Port for the HTTP server")
 
     args = parser.parse_args()
+    config = configparser.ConfigParser()
+    config_file='scale_config.ini'
 
-    scale = Scale()
+    signal.signal(signal.SIGINT, signal_handler)  # Catch CTRL+C and shutdown gracefully
+    signal.signal(signal.SIGTERM, signal_handler)  # Catch CTRL+C and shutdown gracefully
+    
+    if os.path.exists(args.output):
+        sample_buffer = deque(np.loadtxt(args.output), maxlen=args.number)
+    else:
+        sample_buffer = deque(maxlen=args.number)  # Circular buffer for samples
 
     try:
-        if args.port>0:
-            # Start the HTTP server in a separate thread
-            http_server_thread = threading.Thread(target=start_http_server, args=(args.host, args.port, os.path.dirname(os.path.abspath(__file__))))
+        scale = Scale()  # Create an instance of Scale
+        
+        # Create a state queue of maxsize 1
+        q = queue.Queue(maxsize=1)
+        q.put(STATE_MEASURING)
+
+        if args.port > 0:
+            # Pass the scale, current_state, and state_lock to the server
+            http_server_thread = threading.Thread(target=start_http_server, args=(args.host, args.port, os.path.dirname(os.path.abspath(__file__)), scale, q))
             http_server_thread.daemon = True
             http_server_thread.start()
-
+            
         if args.tare:
+            print("Taring...")
             scale.tare(args.duration)
             print("Taring complete.")
+
         elif args.calibrate is not None:
+            print(f"Calibrating to {args.calibrate}")
+            config['DEFAULT']['KnownWeight'] = str(args.calibrate)
+            with open(config_file, 'w') as configfile:
+                config.write(configfile)
+                
             scale.calibrate(args.calibrate, args.duration)
             print("Calibration complete.")
+
         else:
-            if os.path.exists(args.output):
-                sample_buffer = deque(np.loadtxt(args.output), maxlen=args.number)
-            else:
-                sample_buffer = deque(maxlen=args.number)  # Circular buffer for samples
 
-            
             while args.number > 1:
-                samples = scale.collect_samples(args.duration)
-                samples = scale.weight_from_raw(samples)
-                median_value = np.median(samples)
-                lower_bound, upper_bound = scale.bootstrap_confidence_interval(samples)
-                ci_range = upper_bound - lower_bound
-                significant_figures = int(-np.floor(np.log10(ci_range)))
-                significant_figures = max(1,significant_figures)
-                formatted_median = float(f"{median_value:.{significant_figures}f}")
-                formatted_range = float(f"{ci_range:.{significant_figures}f}")
-
-                # Output the result
-                print(f"{formatted_median} {formatted_range}", flush=True)
-
-                # Append the result to the circular buffer and save to file
-                if args.output != "":
-                    sample_buffer.append(formatted_median)
-                    np.savetxt(args.output, sample_buffer)
+                try:
+                    state = q.get()
+                except Exception as e:
+                    pass
+        
+                if state == STATE_MEASURING:
+                    scale.measure(args.duration, sample_buffer, args.output, args.plot)
+                    if q.empty():
+                        q.put(STATE_MEASURING, block=False)
                     
-                if args.plot != "":
-                    # Create a line plot
-                    plt.figure(figsize=(10, 6))  # You can adjust the size of the plot
-                    plt.plot(sample_buffer, label='Weight (g)')
-                    plt.xlabel('Sample Number')
-                    plt.ylabel('Weight (g)')
-                    plt.title('Weight (g)')
+                elif state == STATE_TARING:
+                    # Perform taring and then switch to idle or measuring
+                    print("Taring")
+                    scale.tare(args.duration)
+                    if q.empty():
+                        q.put(STATE_MEASURING, block=False)
                     
-                    # Ensure axes have only integer values and control the tick density
-                    plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
-                    plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))  
-
-                    # Save the plot to a PNG file
-                    plt.savefig(args.plot)
-                    plt.close()
+                elif state == STATE_CALIBRATING:
+                    # Perform calibrating and then switch to idle or measuring
+                    with open(config_file, 'r') as configfile:
+                        config.read(configfile)
+                    known_weight = config['DEFAULT']['KnownWeight']
+                    print(f"Calibrating to {known_weight}")
+                    scale.calibrate(known_weight, args.duration)
+                    if q.empty():
+                        q.put(STATE_MEASURING, block=False)
                 
+            
     except Exception as e:
         print(f"An error occurred: {e}")
+        traceback.print_exc()
     finally:
         scale.cleanup()
         

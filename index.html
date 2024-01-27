@@ -11,9 +11,39 @@
         }
         // Set interval for refreshing the image (e.g., every 5 seconds)
         setInterval(refreshImage, 5000);
+		
+		function sendPostRequest(url, data) {
+			var xhr = new XMLHttpRequest();
+			xhr.open("POST", url, true);
+			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+			xhr.onload = function () {
+				alert(xhr.responseText);
+			};
+			xhr.send(data);
+		}
+
+		function tareScale() {
+			var duration = 10; // Default duration or get it from user input
+			sendPostRequest('/tare', 'duration=' + duration);
+		}
+
+		function calibrateScale() {
+			var weight = document.getElementById("calibrationWeight").value;
+			var duration = 10; // Default duration or get it from user input
+			sendPostRequest('/calibrate', 'weight=' + weight + '&duration=' + duration);
+		}
+
     </script>
 </head>
 <body>
     <img id="chart" src="samples.png" alt="Weight Readings Chart">
+    <div>
+        <button onclick="tareScale()">Tare Scale</button> <!-- Tare button -->
+        <br>
+        <input type="number" id="calibrationWeight" placeholder="Enter weight for calibration">
+        <button onclick="calibrateScale()">Calibrate Scale</button> <!-- Calibrate button -->
+		
+    </div>
+
 </body>
 </html>

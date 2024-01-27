@@ -4,6 +4,10 @@ import numpy as np
 import RPi.GPIO as GPIO
 from hx711 import HX711
 
+from collections import deque
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 class Scale:
     def __init__(self, config_file='scale_config.ini'):
@@ -69,6 +73,41 @@ class Scale:
         lower_bound = np.percentile(bootstrapped_medians, (100 - ci) / 2)
         upper_bound = np.percentile(bootstrapped_medians, 100 - (100 - ci) / 2)
         return lower_bound, upper_bound
-        
+    
+    def measure(self, duration, sample_buffer, output=None, plot=None):
+        samples = self.collect_samples(duration)
+        samples = self.weight_from_raw(samples)
+        median_value = np.median(samples)
+        lower_bound, upper_bound = self.bootstrap_confidence_interval(samples)
+        ci_range = upper_bound - lower_bound
+        significant_figures = int(-np.floor(np.log10(ci_range)))
+        significant_figures = max(1,significant_figures)
+        formatted_median = float(f"{median_value:.{significant_figures}f}")
+        formatted_range = float(f"{ci_range:.{significant_figures}f}")
+
+        # Output the result
+        print(f"{formatted_median} {formatted_range}", flush=True)
+
+        # Append the result to the circular buffer and save to file
+        if output != None:
+            sample_buffer.append(formatted_median)
+            np.savetxt(output, sample_buffer)
+            
+        if plot != None:
+            # Create a line plot
+            plt.figure(figsize=(10, 6))  # You can adjust the size of the plot
+            plt.plot(sample_buffer, label='Weight (g)')
+            plt.xlabel('Sample Number')
+            plt.ylabel('Weight (g)')
+            plt.title('Weight (g)')
+            
+            # Ensure axes have only integer values and control the tick density
+            plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
+            plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))  
+
+            # Save the plot to a PNG file
+            plt.savefig(plot)
+            plt.close()
+
     def cleanup(self):
         GPIO.cleanup()
