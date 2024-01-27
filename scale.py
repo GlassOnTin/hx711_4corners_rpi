@@ -6,8 +6,12 @@ from hx711 import HX711
 
 from collections import deque
 import numpy as np
+from scipy.signal import filtfilt, butter
+
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+
+from scipy.optimize import root_scalar
 
 class Scale:
     def __init__(self):
@@ -28,21 +32,21 @@ class Scale:
         readings = [sensor.get_raw_data(times=1)[0] for sensor in self.sensors]
         return sum(readings)
 
-    def collect_samples(self, duration):
-        end_time = time.time() + duration
+    def collect_samples(self, sample_duration):
+        end_time = time.time() + sample_duration
         samples = []
         while time.time() < end_time:
             samples.append(self.collect_sample())
         return np.array(samples)
 
-    def tare(self, duration):
+    def tare(self, sample_duration):
         print("Taring the scale. Ensure the scale is empty.")
-        tare_value = np.median(self.collect_samples(duration))
+        tare_value = np.median(self.collect_samples(sample_duration))
         return tare_value
 
-    def calibrate(self, known_weight, duration):
+    def calibrate(self, known_weight, sample_duration):
         print(f"Place a known weight of {known_weight} units on the scale.")
-        reading_with_weight = np.median(self.collect_samples(duration))
+        reading_with_weight = np.median(self.collect_samples(sample_duration))
         scale_factor = known_weight / (reading_with_weight - tare_value)
         return scale_factor
         
@@ -56,7 +60,7 @@ class Scale:
         upper_bound = np.percentile(bootstrapped_medians, 100 - (100 - ci) / 2)
         return lower_bound, upper_bound
           
-    def measure(self, duration=10, scale_factor=1, tare_value=0, sample_file="samples.txt", buffer_length=10000, plot_file="samples.png"):
+    def measure(self, sample_duration=10, scale_factor=1, tare_value=0, sample_file="samples.txt", buffer_length=10000, plot_file="samples.png"):
         # Check if the file exists and is not empty
         if os.path.exists(sample_file) and os.path.getsize(sample_file) > 0:
             try:
@@ -69,7 +73,7 @@ class Scale:
         else:
             sample_buffer = deque(maxlen=buffer_length)  # Initialize an empty buffer if file doesn't exist or is empty
 
-        samples = self.collect_samples(duration)
+        samples = self.collect_samples(sample_duration)
         samples = self.weight_from_raw(samples, scale_factor, tare_value)
         median_value = np.median(samples)
         lower_bound, upper_bound = self.bootstrap_confidence_interval(samples)
@@ -88,21 +92,47 @@ class Scale:
             # When saving, ensure the data is in an array format, especially if it's a single value
             np.savetxt(sample_file, list(sample_buffer))
             
-        if plot_file != None:
-            # Create a line plot
-            plt.figure(figsize=(10, 6))  # You can adjust the size of the plot
-            plt.plot(sample_buffer, label='Weight (g)')
-            plt.xlabel('Sample Number')
-            plt.ylabel('Weight (g)')
-            plt.title('Weight (g)')
-            
-            # Ensure axes have only integer values and control the tick density
-            plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
-            plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))  
+        # Saving the plot if a filename is provided
+        if plot_file is not None:
+            # Calculate the time interval between samples
+            total_samples = len(sample_buffer)
 
-            # Save the plot to a PNG file
-            plt.savefig(plot_file)
+            # Create a time array that corresponds to each sample
+            time_array = np.linspace(0, sample_duration*total_samples/60, total_samples)
+            
+            def butter_lowpass_filter(data, cutoff_freq, fs, order=3):
+                nyq = 0.5 * fs  # Nyquist Frequency
+                normal_cutoff = cutoff_freq / nyq
+                # Get the filter coefficients 
+                b, a = butter(order, normal_cutoff, btype='low', analog=False)
+                y = filtfilt(b, a, data)
+                return y
+
+            # Example usage
+            fs = 1.0 / sample_duration  # Sampling frequency in min^-1
+            cutoff_freq = 1.0/(5.0*60)  # Cutoff frequency in min^-1 
+            smoothed_data = butter_lowpass_filter(np.array(sample_buffer), cutoff_freq, fs)
+            
+            # Use the original time_array for plotting since we've adjusted smoothed_data to match its length
+            plt.figure(figsize=(10, 6))
+            plt.scatter(time_array, sample_buffer, label='Raw Weight (g)', alpha=0.5, s=10, color='gray')  # Plot raw data as dots
+            plt.plot(time_array, smoothed_data, label='Smoothed Weight (g)', color='blue')  # Plot smoothed (and padded) data as a line
+            plt.xlabel('Time (min)')
+            plt.ylabel('Weight (g)')
+            plt.title('Weight Measurement Over Time')
+            plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
+            plt.legend()
+            plt.show()
+            
+            tmp_file = plot_file + ".tmp.png"
+            plt.savefig(tmp_file)
             plt.close()
+
+            # Rename the temporary file to the final filename, ensuring overwrite
+            if os.path.exists(plot_file):
+                os.remove(plot_file)
+            os.rename(tmp_file, plot_file)
+            
 
     def cleanup(self):
         GPIO.cleanup()

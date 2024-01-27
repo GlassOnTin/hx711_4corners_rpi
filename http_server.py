@@ -7,6 +7,9 @@ import urllib
 from urllib.parse import urlparse, parse_qs
 from states import STATE_TARING, STATE_CALIBRATING, STATE_MEASURING, STATE_CLEARING
 
+socketserver.allow_reuse_address = True
+socketserver.TCPServer.allow_reuse_address = True
+
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, state_q=None, config_file='scale_config.ini',**kwargs):
         self.state_q = state_q

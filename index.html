@@ -2,55 +2,57 @@
 <html>
 <head>
     <title>Weight Readings Chart</title>
+	<link rel="stylesheet" href="styles.css">
     <script type="text/javascript">
         function refreshImage() {
             var img = document.getElementById("chart");
             var src = img.src;
-            // Append or update a query string to the image URL to bypass caching
             img.src = src.split("?")[0] + "?" + new Date().getTime();
         }
-        // Set interval for refreshing the image (e.g., every 5 seconds)
         setInterval(refreshImage, 5000);
-		
-		function sendPostRequest(url, data) {
-			var xhr = new XMLHttpRequest();
-			xhr.open("POST", url, true);
-			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr.onload = function () {
-				alert(xhr.responseText);
-			};
-			xhr.send(data);
-		}
 
-		function tareScale() {
-			var duration = 10; // Default duration or get it from user input
-			sendPostRequest('/tare', 'duration=' + duration);
-		}
+        function sendPostRequest(url, data) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", url, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function () {
+                alert(xhr.responseText);
+            };
+            xhr.send(data);
+        }
 
-		function calibrateScale() {
-			var weight = document.getElementById("calibrationWeight").value;
-			var duration = 10; // Default duration or get it from user input
-			sendPostRequest('/calibrate', 'weight=' + weight + '&duration=' + duration);
-		}
-		
-		function clearScale() {
-			sendPostRequest('/clear','');		
-		}
+        function tareScale() {
+            var duration = 10; // Default duration
+            sendPostRequest('/tare', 'duration=' + duration);
+        }
 
+        function calibrateScale() {
+            var weight = document.getElementById("calibrationWeight").value;
+            var duration = 10; // Default duration
+            sendPostRequest('/calibrate', 'weight=' + weight + '&duration=' + duration);
+        }
+
+        function clearScale() {
+            sendPostRequest('/clear','');
+        }
     </script>
 </head>
 <body>
-    <img id="chart" src="samples.png" alt="Weight Readings Chart">
-    <div>
-        <button onclick="tareScale()">Tare Scale</button> <!-- Tare button -->
-        <br><br>
-        <input type="number" id="calibrationWeight" placeholder="Enter weight for calibration">
-        <button onclick="calibrateScale()">Calibrate Scale</button> <!-- Calibrate button -->
-		<br><br>
-        <button onclick="clearScale()">Clear</button> <!-- Clear button -->
-		
-		
+    <div class="gif-background">
+        <img src="background.gif" alt="Background GIF">
     </div>
-
+	<div class="content">
+		<div class="container">
+			<div class="image-container">
+				<img id="chart" src="samples.png" alt="Weight Readings Chart">
+			</div>
+			<div class="controls">
+				<button onclick="tareScale()">Tare Scale</button>
+				<input type="number" id="calibrationWeight" placeholder="Enter weight for calibration">
+				<button onclick="calibrateScale()">Calibrate Scale</button>
+				<button onclick="clearScale()">Clear</button>
+			</div>
+		</div>
+	</div>
 </body>
 </html>
