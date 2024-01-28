@@ -6,7 +6,7 @@ from hx711 import HX711
 
 from collections import deque
 import numpy as np
-from scipy.signal import filtfilt, butter
+from scipy.signal import filtfilt, butter, wiener
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -60,7 +60,15 @@ class Scale:
         upper_bound = np.percentile(bootstrapped_medians, 100 - (100 - ci) / 2)
         return lower_bound, upper_bound
           
-    def measure(self, sample_duration=10, scale_factor=1, tare_value=0, sample_file="samples.txt", buffer_length=10000, plot_file="samples.png"):
+    def measure(self, 
+        sample_duration=10, 
+        scale_factor=1, 
+        tare_value=0, 
+        sample_file="samples.txt", 
+        buffer_length=10000, 
+        plot_file="samples.png", 
+        low_pass_minutes=10 ):
+        
         # Check if the file exists and is not empty
         if os.path.exists(sample_file) and os.path.getsize(sample_file) > 0:
             try:
@@ -100,28 +108,62 @@ class Scale:
             # Create a time array that corresponds to each sample
             time_array = np.linspace(0, sample_duration*total_samples/60, total_samples)
             
-            def butter_lowpass_filter(data, cutoff_freq, fs, order=3):
-                nyq = 0.5 * fs  # Nyquist Frequency
-                normal_cutoff = cutoff_freq / nyq
-                # Get the filter coefficients 
-                b, a = butter(order, normal_cutoff, btype='low', analog=False)
-                y = filtfilt(b, a, data)
-                return y
+            #fs = 1.0 / sample_duration  # Sampling frequency in min^-1
+            #cutoff_freq = 1.0/(low_pass_minutes*60)  # Cutoff frequency in min^-1 
+            #nyq = 0.5 * fs  # Nyquist Frequency
+            #normal_cutoff = cutoff_freq / nyq
+            ## Get the filter coefficients 
+            #b, a = butter(order, normal_cutoff, output='ba', analog=False)
+            #smoothed_data = filtfilt(b, a, data)
 
-            # Example usage
-            fs = 1.0 / sample_duration  # Sampling frequency in min^-1
-            cutoff_freq = 1.0/(5.0*60)  # Cutoff frequency in min^-1 
-            smoothed_data = butter_lowpass_filter(np.array(sample_buffer), cutoff_freq, fs)
+            window = int(low_pass_minutes * 60 / sample_duration)
+            b = np.array(sample_buffer)
+
+            # Correctly reflect and append data at both ends
+            # Reflect the start of the array and append to the beginning
+            start_reflection = 2.0*b[0] - b[:window][::-1]
+            # Reflect the end of the array and append to the end
+            end_reflection = 2.0*b[-1] - b[-window:][::-1]
+
+            # Combine start reflection, original array, and end reflection
+            b_reflected = np.concatenate([start_reflection, b, end_reflection])
+
+            # Apply Wiener filter
+            b_filtered = wiener(b_reflected, window)
+
+            # Remove the reflected parts to get the smoothed data of original length
+            smoothed_data = b_filtered[window:-window]
             
+            # Calculate a margin for the y-axis range for better visualization
+            margin = (smoothed_data.max() - smoothed_data.min()) * 0.05  # 5% margin            
+
+            # Constants for ASA filament
+            density = 1.07  # g/cm^3
+            radius_cm = 1.75 / 2 / 10  # Convert mm to cm
+            volume_per_cm = np.pi * radius_cm**2  # Volume per cm of filament
+
+            # Calculate weight to length conversion (cm per g)
+            length_per_g = 1 / (volume_per_cm * density)
+
+            # Convert smoothed weight data to length (assuming weight is in grams)
+            smoothed_length = smoothed_data * length_per_g / 100  # Convert cm to meters
+
             # Use the original time_array for plotting since we've adjusted smoothed_data to match its length
             plt.figure(figsize=(10, 6))
-            plt.scatter(time_array, sample_buffer, label='Raw Weight (g)', alpha=0.5, s=10, color='gray')  # Plot raw data as dots
+            plt.scatter(time_array, sample_buffer, label='Raw Weight (g)', alpha=0.9, s=10, color='gray')  # Plot raw data as dots
             plt.plot(time_array, smoothed_data, label='Smoothed Weight (g)', color='blue')  # Plot smoothed (and padded) data as a line
             plt.xlabel('Time (min)')
             plt.ylabel('Weight (g)')
             plt.title('Weight Measurement Over Time')
             plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
-            plt.legend()
+            plt.ylim(smoothed_data.min() - margin, smoothed_data.max() + margin)
+            
+            # Create secondary y-axis (length)
+            ax2 = plt.gca().twinx()
+            ax2.plot(time_array, smoothed_length, label='Filament Length (m)', color='blue')
+            ax2.set_ylabel('Length (m)')
+            ax2.yaxis.set_major_locator(MaxNLocator(nbins=10))
+
             plt.show()
             
             tmp_file = plot_file + ".tmp.png"
