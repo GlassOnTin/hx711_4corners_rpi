@@ -20,43 +20,66 @@ from scale import Scale
 from http_server import start_http_server  # Import the server start function
 from states import STATE_TARING, STATE_CALIBRATING, STATE_MEASURING, STATE_CLEARING
 
-def safe_getfloat(config, section, option, fallback=None):
+def safe_getfloat(config, section, option, fallback):
+    """Safely get a float value from the config, providing a fallback if necessary."""
     try:
-        # Attempt to get the value and convert it to float
-        value_str = config.get(section, option, fallback=str(fallback))
-        return float(value_str) if value_str.lower() != 'none' else fallback
-    except ValueError:
-        # Handle the case where conversion to float fails
+        return config.getfloat(section, option)
+    except (configparser.NoSectionError, configparser.NoOptionError):
         return fallback
-        
+
 def load_config_and_parse_args():
     config = configparser.ConfigParser()
     config_file = 'scale_config.ini'
     config.read(config_file)  # Load the configuration file
     
-    # Check and set default for scale_factor
+    # Ensure defaults are set for scale_factor and tare_value
     if 'scale_factor' not in config['DEFAULT'] or not config['DEFAULT']['scale_factor'].replace('.', '', 1).isdigit():
         config['DEFAULT']['scale_factor'] = '1'  # Default value
     
-    # Check and set default for tare_value
     if 'tare_value' not in config['DEFAULT'] or not config['DEFAULT']['tare_value'].replace('.', '', 1).lstrip('-').isdigit():
         config['DEFAULT']['tare_value'] = '0'  # Default value
 
     # Define command-line arguments with defaults from the configuration file
     parser = argparse.ArgumentParser(description="Scale Operation")
-    parser.add_argument("-t", "--tare", action="store_true", default=config.getboolean('DEFAULT', 'Tare', fallback=False), help="Tare the scale")
-    parser.add_argument("-c", "--calibrate", type=float, default=safe_getfloat(config,'DEFAULT', 'Calibrate', fallback=None), help="Calibrate the scale with a known weight")
-    parser.add_argument("-d", "--duration", type=float, default=safe_getfloat(config,'DEFAULT', 'Duration', fallback=10), help="Sample duration in seconds")
-    parser.add_argument("-n", "--number", type=int, default=config.getint('DEFAULT', 'Number', fallback=1), help="Number of samples of given duration to report")
-    parser.add_argument("-o", "--output", type=str, default=config.get('DEFAULT', 'Output', fallback='samples.txt'), help="Path to output results")
-    parser.add_argument("-p", "--plot", type=str, default=config.get('DEFAULT', 'Plot', fallback='samples.png'), help="Path to output chart of results")
-    parser.add_argument("-H", "--host", type=str, default=config.get('DEFAULT', 'Host', fallback='localhost'), help="Host address for the HTTP server")
-    parser.add_argument("-P", "--port", type=int, default=config.getint('DEFAULT', 'Port', fallback=0), help="Port for the HTTP server")
+    parser.add_argument("-t", "--tare", nargs='?', type=float, const=safe_getfloat(config, 'DEFAULT', 'tare_weight', 0.0), default=np.inf, help="Tare the scale to the specified weight. If no weight is provided, default to 0.0")
+    parser.add_argument("-c", "--calibrate", type=float, help="Calibrate the scale with a known weight")
+    parser.add_argument("-d", "--duration", type=float, default=safe_getfloat(config, 'DEFAULT', 'duration', 1.0), help="Sample duration in seconds")
+    parser.add_argument("-n", "--number", type=int, default=config.getint('DEFAULT', 'number', fallback=1), help="Number of samples of given duration to report")
+    parser.add_argument("-o", "--output", type=str, default=config.get('DEFAULT', 'output', fallback='samples.txt'), help="Path to output results")
+    parser.add_argument("-p", "--plot", type=str, default=config.get('DEFAULT', 'plot', fallback='samples.png'), help="Path to output chart of results")
+    parser.add_argument("-H", "--host", type=str, default=config.get('DEFAULT', 'host', fallback='localhost'), help="Host address for the HTTP server")
+    parser.add_argument("-P", "--port", type=int, default=config.getint('DEFAULT', 'port', fallback=0), help="Port for the HTTP server")
+    parser.add_argument("--density", type=float, default=safe_getfloat(config, 'DEFAULT', 'density_gcm3', 1.07), help="The material density in g/cm^3, used to estimate remaining material length")
+    parser.add_argument("--diameter", type=float, default=safe_getfloat(config, 'DEFAULT', 'diameter_mm', 1.75), help="The material diameter in mm, used to estimate remaining material length")
+
     args = parser.parse_args()
 
+    if args.tare != np.inf:
+        print(f"Taring the scale to {args.tare}g.")
+    else:
+        print("No taring requested.")
+    
+    # Map from command line argument names to config names
+    cli_to_config_map = {
+        'tare': 'tare_weight',
+        'calibrate': 'target_weight',
+        'density': 'density_gcm3',
+        'diameter': 'diameter_mm'
+    }
+
     # Update the config file if any argument is provided
+    args_dict = vars(args)
+    for cli_arg, config_name in cli_to_config_map.items():
+        if args_dict.get(cli_arg) is not None:
+            config['DEFAULT'][config_name] = str(args_dict[cli_arg])
+
+    # Directly map arguments without name changes
+    for arg in args_dict:
+        if arg not in cli_to_config_map and args_dict[arg] is not None:
+            config['DEFAULT'][arg] = str(args_dict[arg])
+
+    # Save updates to config file
     with open(config_file, 'w') as configfile:
-        config['DEFAULT'].update({arg: str(getattr(args, arg)) for arg in vars(args)})
         config.write(configfile)
 
     return args, config
@@ -68,30 +91,44 @@ def state_machine(state_queue, args, config_file):
         while True:
             config = configparser.ConfigParser()
             config.read(config_file)  # Reload the configuration on each iteration
-            duration = config['DEFAULT']['duration']
+            duration = safe_getfloat(config, 'DEFAULT', 'duration', 1.0)
+            tare_weight = safe_getfloat(config, 'DEFAULT', 'tare_weight', 0.0)
+            tare_value = safe_getfloat(config, 'DEFAULT', 'tare_value', 0.0)
+            target_weight = safe_getfloat(config, 'DEFAULT', 'target_weight', 1000.0)
+            scale_factor = safe_getfloat(config, 'DEFAULT', 'scale_factor', 1.0)
+            buffer_length = int(config['DEFAULT']['number'])
+            sample_file = config['DEFAULT']['output']
+            plot_file = config['DEFAULT']['plot']
+            density_gcm3 = safe_getfloat(config, 'DEFAULT', 'density_gcm3', 1.07)
+            diameter = safe_getfloat(config, 'DEFAULT', 'diameter_mm', 1.75)            
             
             try:
                 state = state_queue.get_nowait()
             except queue.Empty:
                 state = STATE_MEASURING  # Default state if the queue is empty
 
-            if state == STATE_MEASURING:
-                tare_value = float(config['DEFAULT']['tare_value'])
-                scale_factor = float(config['DEFAULT']['scale_factor'])
-                buffer_length = int(config['DEFAULT']['number'])
-                sample_file = config['DEFAULT']['output']
-                plot_file = config['DEFAULT']['plot']
-                scale.measure(args.duration, scale_factor, tare_value, sample_file, buffer_length, plot_file)
-                                           
+            if state == STATE_MEASURING:               
+                time_array, sample_buffer, smoothed_data = scale.measure(
+                    duration, 
+                    scale_factor, 
+                    tare_value, 
+                    sample_file, 
+                    buffer_length)
+                    
+                scale.plot(time_array, sample_buffer, smoothed_data, plot_file)
+                
+                time_to_zero_timedelta, estimated_zero_datetime = scale.estime_time_to_zero( duration, smoothed_data)        
+                                                           
             elif state == STATE_TARING:
                 print("Taring...")
-                config['DEFAULT']['tare_value'] = scale.tare(args.duration)
+                tare_value = scale.tare(duration)
+                
+                config['DEFAULT']['tare_value'] = tare_value
                 with open(config_file, 'w') as configfile:
                     config.write(configfile)
                 print("Taring complete.")                
                 
             elif state == STATE_CALIBRATING:
-                target_weight = config['DEFAULT']['calibrate']             
                 print(f"Calibrating to {target_weight}")
                 
                 config['DEFAULT']['scale_factor'] = scale.calibrate(target_weight, duration)

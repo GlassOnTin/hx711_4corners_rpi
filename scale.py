@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import numpy as np
 import RPi.GPIO as GPIO
 from hx711 import HX711
@@ -66,7 +67,6 @@ class Scale:
         tare_value=0, 
         sample_file="samples.txt", 
         buffer_length=10000, 
-        plot_file="samples.png", 
         low_pass_minutes=10 ):
         
         # Check if the file exists and is not empty
@@ -99,55 +99,56 @@ class Scale:
         if sample_file != None:
             # When saving, ensure the data is in an array format, especially if it's a single value
             np.savetxt(sample_file, list(sample_buffer))
+        
+        # Create a time array that corresponds to each sample
+        total_samples = len(sample_buffer)
+        time_array = np.linspace(0, sample_duration*total_samples/60, total_samples)
+        
+        # Filter the data to reduce noise
+        window = int(low_pass_minutes * 60 / sample_duration)
+        b = np.array(sample_buffer)
+
+        if window>5 and len(sample_buffer)<=window:
+            window = int(len(sample_buffer) / 2)
+        else:
+            return time_array, sample_buffer, b
             
+        # Correctly reflect and append data at both ends
+        # Reflect the start of the array and append to the beginning
+        start_reflection = 2.0*b[0] - b[:window][::-1]
+        # Reflect the end of the array and append to the end
+        end_reflection = 2.0*b[-1] - b[-window:][::-1]
+
+        # Combine start reflection, original array, and end reflection
+        b_reflected = np.concatenate([start_reflection, b, end_reflection])
+
+        # Apply Wiener filter
+        b_filtered = wiener(b_reflected, window)
+
+        # Remove the reflected parts to get the smoothed data of original length
+        smoothed_data = b_filtered[window:-window]
+
+
+
+        return time_array, sample_buffer, smoothed_data
+        
+    def plot(self, time_array, sample_buffer, smoothed_data, plot_file="samples.png", density_gcm3 = 1.07, diameter_mm = 1.75):
         # Saving the plot if a filename is provided
-        if plot_file is not None:
-            # Calculate the time interval between samples
-            total_samples = len(sample_buffer)
-
-            # Create a time array that corresponds to each sample
-            time_array = np.linspace(0, sample_duration*total_samples/60, total_samples)
-            
-            #fs = 1.0 / sample_duration  # Sampling frequency in min^-1
-            #cutoff_freq = 1.0/(low_pass_minutes*60)  # Cutoff frequency in min^-1 
-            #nyq = 0.5 * fs  # Nyquist Frequency
-            #normal_cutoff = cutoff_freq / nyq
-            ## Get the filter coefficients 
-            #b, a = butter(order, normal_cutoff, output='ba', analog=False)
-            #smoothed_data = filtfilt(b, a, data)
-
-            window = int(low_pass_minutes * 60 / sample_duration)
-            b = np.array(sample_buffer)
-
-            # Correctly reflect and append data at both ends
-            # Reflect the start of the array and append to the beginning
-            start_reflection = 2.0*b[0] - b[:window][::-1]
-            # Reflect the end of the array and append to the end
-            end_reflection = 2.0*b[-1] - b[-window:][::-1]
-
-            # Combine start reflection, original array, and end reflection
-            b_reflected = np.concatenate([start_reflection, b, end_reflection])
-
-            # Apply Wiener filter
-            b_filtered = wiener(b_reflected, window)
-
-            # Remove the reflected parts to get the smoothed data of original length
-            smoothed_data = b_filtered[window:-window]
+        if plot_file is not None and sample_buffer is not None and len(sample_buffer) > 1 and smoothed_data is not None and len(smoothed_data) > 1:
             
             # Calculate a margin for the y-axis range for better visualization
             margin = (smoothed_data.max() - smoothed_data.min()) * 0.05  # 5% margin            
 
             # Constants for ASA filament
-            density = 1.07  # g/cm^3
-            radius_cm = 1.75 / 2 / 10  # Convert mm to cm
+            radius_cm = diameter_mm / 2.0 / 10.0  # Convert mm to cm
             volume_per_cm = np.pi * radius_cm**2  # Volume per cm of filament
 
             # Calculate weight to length conversion (cm per g)
-            length_per_g = 1 / (volume_per_cm * density)
+            length_per_g = 1 / (volume_per_cm * density_gcm3)
 
             # Convert smoothed weight data to length (assuming weight is in grams)
-            smoothed_length = smoothed_data * length_per_g / 100  # Convert cm to meters
-
+            smoothed_length = smoothed_data * length_per_g / 100.0  # Convert cm to meters
+            
             # Use the original time_array for plotting since we've adjusted smoothed_data to match its length
             plt.figure(figsize=(10, 6))
             plt.scatter(time_array, sample_buffer, label='Raw Weight (g)', alpha=0.9, s=10, color='gray')  # Plot raw data as dots
@@ -174,7 +175,24 @@ class Scale:
             if os.path.exists(plot_file):
                 os.remove(plot_file)
             os.rename(tmp_file, plot_file)
+        
+    def estime_time_to_zero(self, sample_duration, smoothed_data):
+        try:
+            # Estimate the time until zero
+            # Calculate gradients between consecutive points
+            gradients = np.diff(smoothed_data) / sample_duration  # Assuming time_array is in minutes
+            median_gradient = np.median(gradients)
             
+            if median_gradient >= 0:
+                time_to_zero = -smoothed_data[-1] / median_gradient
 
+            time_to_zero_timedelta = datetime.timedelta(minutes=time_to_zero)
+            estimated_zero_datetime = datetimes[-1] + time_to_zero_timedelta
+           
+            return time_to_zero_timedelta, estimated_zero_datetime
+
+        except:
+            return np.inf, datetime.datetime.now()
+            
     def cleanup(self):
         GPIO.cleanup()
