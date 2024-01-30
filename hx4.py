@@ -123,7 +123,7 @@ def state_machine(state_queue, args, config_file):
                 print("Taring...")
                 tare_value = scale.tare(duration)
                 
-                config['DEFAULT']['tare_value'] = tare_value
+                config['DEFAULT']['tare_value'] = str(tare_value)
                 with open(config_file, 'w') as configfile:
                     config.write(configfile)
                 print("Taring complete.")                
@@ -145,7 +145,7 @@ def state_machine(state_queue, args, config_file):
                 print("Clearing complete")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Exception in hx4.py: {e}")
         traceback.print_exc()
 
     finally:
