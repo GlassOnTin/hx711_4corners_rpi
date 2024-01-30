@@ -7,11 +7,14 @@ This project develops a digital scale using the Raspberry Pi, interfacing with t
 **Uses** : [HX711 Python Library on PyPI](https://pypi.org/project/hx711/) 
 
 ## Features
+- Simple Web interface with live chart
 - Multi-sensor support with HX711 load cell amplifiers.
 - Taring functionality for zeroing the scale.
 - Calibration capability using a known weight.
 - Data collection over a user-defined duration.
 - Bootstrapped confidence interval calculations for precision measurement analysis.
+
+![Screenshot](https://raw.githubusercontent.com/GlassOnTin/hx711_4corners_rpi/main/Screenshot.png)
 
 ## Requirements 
 - **Hardware** : Raspberry Pi (Tested on Raspberry Pi 4), HX711 load cell amplifier, compatible load cells. 
